@@ -17,13 +17,23 @@ async def _producer(queue, tasks):
         await queue.put((idx, tasks[idx], 0))
 
 
-async def _consumer(queue, result_queue, task_func, task_name, error_value=None, max_retry=3):
+async def _consumer(
+    queue,
+    result_queue,
+    task_func,
+    task_name,
+    error_value=None,
+    max_retry=3
+):
     await asyncio.sleep(1)
     print(f"consumer {task_name} start")
 
     while True:
         try:
-            idx, item, attempts = await asyncio.wait_for(queue.get(), timeout=10)
+            idx, item, attempts = await asyncio.wait_for(
+                queue.get(),
+                timeout=10
+            )
             if item is None:
                 queue.task_done()
                 break
