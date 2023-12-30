@@ -2,7 +2,8 @@
 - 以asyncio异步队列方式实现一个灵活、轻量级、高并发任务执行器
 
 ## 使用方式
-git clone https://github.com/Mowuyy/async_queue_flow.git
+方式一：git clone https://github.com/Mowuyy/async_queue_flow.git
+方式二：git submodule add https://github.com/Mowuyy/async_queue_flow.git async_queue_flow
 
 ```python
 import random
