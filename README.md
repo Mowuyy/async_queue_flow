@@ -4,6 +4,8 @@
 ## 使用方式
 ```python
 import random
+
+
 async def task_func(item):
     if random.random() < 0.3:  # 假设有30%的失败概率
         raise ValueError("任务处理失败")
