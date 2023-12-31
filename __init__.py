@@ -7,9 +7,9 @@
 import asyncio
 import inspect
 from typing import Any, Callable
-from collections.abc import Coroutine
 
 AsyncCallable = Callable[..., ...]
+_STOP_ITEM = None
 
 
 async def _producer(queue, tasks):
@@ -29,13 +29,14 @@ async def _consumer(
     print(f"consumer {task_name} start")
     while True:
         try:
-            idx, item, attempts = await asyncio.wait_for(
+            item = await asyncio.wait_for(
                 queue.get(),
                 timeout=10
             )
-            if item is None:
+            if item is _STOP_ITEM:
                 queue.task_done()
                 break
+            idx, item, attempts = item
             try:
                 result = await asyncio.wait_for(
                     task_func(item),
@@ -58,7 +59,7 @@ async def _consumer(
 
 async def _stop_signal(task_queue, consumer_size):
     for _ in range(consumer_size):
-        await task_queue.put((0, None, 0))
+        await task_queue.put(_STOP_ITEM)
 
 
 async def _parse_result(result_queue):
