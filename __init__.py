@@ -43,7 +43,7 @@ async def _consumer(
                 )
             except Exception as e:
                 if attempts > max_retry:
-                    print(f"consumer {task_name} error, qsize={queue.qsize()}, error_msg={e}")
+                    print(f"Consumer {task_name} error, qsize={queue.qsize()}, error_msg={e}")
                     await result_queue.put((idx, error_value))
                 else:
                     await queue.put((idx, item, attempts + 1))
@@ -52,6 +52,7 @@ async def _consumer(
             finally:
                 queue.task_done()
         except asyncio.TimeoutError:
+            print(f'Not found task in queue, qsize={queue.qsize()}')
             break
 
 
@@ -115,9 +116,9 @@ if __name__ == "__main__":
     import random
     async def task_func(item):
         if random.random() < 0.3:  # 假设有30%的失败概率
-            raise ValueError("任务处理失败")
+            raise ValueError("test error")
         await asyncio.sleep(0.5)
-        print("任务处理完成：", item)
+        print("Execute result: ", item)
         return item
 
     task_items = [f"test_{i}" for i in range(100)]
@@ -131,4 +132,4 @@ if __name__ == "__main__":
             max_retry=3
         )
     )
-    print("所有任务结果：", results)
+    print("All result:\n", results)
