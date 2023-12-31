@@ -22,12 +22,11 @@ async def _consumer(
     result_queue,
     task_func,
     task_name,
+    task_timeout=None,
     error_value=None,
     max_retry=3
 ):
-    await asyncio.sleep(1)
     print(f"consumer {task_name} start")
-
     while True:
         try:
             idx, item, attempts = await asyncio.wait_for(
@@ -38,7 +37,10 @@ async def _consumer(
                 queue.task_done()
                 break
             try:
-                result = await task_func(item)
+                result = await asyncio.wait_for(
+                    task_func(item),
+                    timeout=task_timeout
+                )
             except Exception as e:
                 if attempts > max_retry:
                     print(f"consumer {task_name} error, qsize={queue.qsize()}, error_msg={e}")
@@ -71,6 +73,7 @@ async def _parse_result(result_queue):
 async def work_flow(
     task_items: list,
     task_func: AsyncCallable,
+    task_timeout: int = None,
     consumer_size: int = 5,
     error_value: Any = None,
     max_retry: int = 3
@@ -93,6 +96,7 @@ async def work_flow(
                 result_queue,
                 task_func,
                 task_name,
+                task_timeout=task_timeout,
                 error_value=error_value,
                 max_retry=max_retry
             )
@@ -121,6 +125,7 @@ if __name__ == "__main__":
         work_flow(
             task_items,
             task_func,
+            task_timeout=10,
             consumer_size=10,
             error_value='Error',
             max_retry=3
