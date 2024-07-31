@@ -1,5 +1,5 @@
 # async_queue_flow
-asyncio异步高并发任务任务处理器，解决任务阻塞、批次执行耗时等待问题。
+asyncio + 队列 实现异步高并发任务任务处理器，解决任务阻塞、批次执行耗时等待问题。
 
 ## 使用方式
 git clone https://github.com/Mowuyy/async_queue_flow.git<br>
