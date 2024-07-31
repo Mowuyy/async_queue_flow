@@ -6,15 +6,37 @@
 
 import asyncio
 import inspect
-from typing import Any, Callable
+import traceback
+import logging
+from typing import Any, Awaitable
 
-AsyncCallable = Callable[..., ...]
 _STOP_ITEM = None
+logger = logging.getLogger(__name__)
 
 
-async def _producer(queue, tasks):
-    for idx in range(len(tasks)):
-        await queue.put((idx, tasks[idx], 0))
+async def _producer(queue, task_items, args_func, args_kwargs=None):
+    if args_func is not None:
+        return await args_func(queue, **args_kwargs)
+    for idx in range(len(task_items)):
+        await queue.put((idx, task_items[idx], 0))
+
+
+async def run_task(task_func, item, timeout=None):
+    if isinstance(item, (list, tuple)):
+        return await asyncio.wait_for(
+            task_func(*item),
+            timeout=timeout
+        )
+    elif isinstance(item, dict):
+        return await asyncio.wait_for(
+            task_func(**item),
+            timeout=timeout
+        )
+    else:
+        return await asyncio.wait_for(
+            task_func(item),
+            timeout=timeout
+        )
 
 
 async def _consumer(
@@ -26,7 +48,7 @@ async def _consumer(
     error_value=None,
     max_retry=3
 ):
-    print(f"consumer {task_name} start")
+    logger.debug(f"consumer {task_name} start")
     while True:
         try:
             item = await asyncio.wait_for(
@@ -37,23 +59,21 @@ async def _consumer(
                 queue.task_done()
                 break
             idx, item, attempts = item
+            logger.debug(f"Running {task_name} idx={idx}, item={item}")
             try:
-                result = await asyncio.wait_for(
-                    task_func(item),
-                    timeout=task_timeout
-                )
-            except Exception as e:
+                result = await run_task(task_func, item, task_timeout)
+            except Exception:
+                logger.error(f"Consumer {task_name} error, qsize={queue.qsize()}, error_msg={traceback.format_exc()}")
                 if attempts > max_retry:
-                    print(f"Consumer {task_name} error, qsize={queue.qsize()}, error_msg={e}")
-                    await result_queue.put((idx, error_value))
+                    await result_queue.put((idx, error_value, item))
                 else:
                     await queue.put((idx, item, attempts + 1))
             else:
-                await result_queue.put((idx, result))
+                await result_queue.put((idx, result, item))
             finally:
                 queue.task_done()
         except asyncio.TimeoutError:
-            print(f'Not found task in queue, qsize={queue.qsize()}')
+            logger.error(f'Not found task in queue, qsize={queue.qsize()}')
             break
 
 
@@ -62,35 +82,54 @@ async def _stop_signal(task_queue, consumer_size):
         await task_queue.put(_STOP_ITEM)
 
 
-async def _parse_result(result_queue):
+async def _parse_result(result_queue, callback, **kwargs):
     results = []
     while not result_queue.empty():
         result = await result_queue.get()
-        results.append(result)
+        if callback is not None:
+            await callback(*result, **kwargs)
+        else:
+            results.append(result)
+        result_queue.task_done()
+
+    if not results:
+        return []
     results.sort(key=lambda x: x[0], reverse=False)
-    results = list(map(lambda x: x[1], results))
-    return results
+    return list(map(lambda x: x[1], results))
 
 
 async def work_flow(
-    task_items: list,
-    task_func: AsyncCallable,
+    task_func: Awaitable,
+    task_items: list = None,
+    args_func: Awaitable = None,
+    args_kwargs: dict = None,
     task_timeout: int = None,
     consumer_size: int = 5,
     error_value: Any = None,
-    max_retry: int = 3
+    max_retry: int = 3,
+    callback: Awaitable = None,
+    alpha: int = 100,
+    **kwargs
 ):
     if not inspect.iscoroutinefunction(task_func):
         raise ValueError("task_func must be async function")
     assert consumer_size > 1, "max_retry must be greater than 1"
     assert max_retry > 0, "max_retry must be greater than 0"
+    consumer_size = min(consumer_size, len(task_items)) if task_items is not None else consumer_size
+
+    if task_items is not None and len(task_items) == 1:
+        item = task_items[0]
+        result = await run_task(task_func, item)
+        if callback is not None:
+            return await callback(0, result, item, **kwargs)
+        return result
     
     result_queue = asyncio.Queue()
     task_queue = asyncio.Queue(
-        maxsize=len(task_items) * 1000  # 队列大小要远远大于（建议100倍）消费者数量，尤其是任务失败重试机制（当队列太小导致队列满时，重试没法推送任务到队列中，导致系统阻塞）
+        maxsize=consumer_size * alpha  # 队列大小要远远大于（建议100倍）消费者数量，尤其是任务失败重试机制（当队列太小导致队列满时，重试没法推送任务到队列中，导致系统阻塞）
     )
 
-    producers = asyncio.create_task(_producer(task_queue, task_items))
+    producers = asyncio.create_task(_producer(task_queue, task_items, args_func, args_kwargs))
     consumers = [
         asyncio.create_task(
             _consumer(
@@ -110,7 +149,7 @@ async def work_flow(
     await task_queue.join()
     await _stop_signal(task_queue, consumer_size)
     await asyncio.gather(*consumers)
-    return await _parse_result(result_queue)
+    return await _parse_result(result_queue, callback, **kwargs)
 
 
 if __name__ == "__main__":
@@ -125,8 +164,8 @@ if __name__ == "__main__":
     task_items = [f"test_{i}" for i in range(100)]
     results = asyncio.run(
         work_flow(
-            task_items,
             task_func,
+            task_func=task_items,
             task_timeout=10,
             consumer_size=10,
             error_value='Error',
